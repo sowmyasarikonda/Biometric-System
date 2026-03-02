@@ -1,0 +1,389 @@
+<!--
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register New Face</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; margin: 0; display: flex; }
+        
+        .sidebar { width: 250px; background: #1a1a2e; color: white; height: 100vh; padding: 20px; position: fixed; box-sizing: border-box;}
+        .sidebar h2 { color: #4e73df; margin-top: 0;}
+        .nav-item { padding: 15px; cursor: pointer; border-radius: 5px; margin-bottom: 5px; transition: 0.2s;}
+        .nav-item:hover { background: #252545; }
+        
+        .main { flex: 1; margin-left: 300px; padding: 40px; display: flex; flex-direction: column; align-items: center; }
+        h1 { color: #333; margin-top: 0; }
+        
+        #video-container {
+            border: 4px solid #ddd; border-radius: 8px; overflow: hidden;
+            background-color: #000; margin-bottom: 20px; width: 640px; position: relative;
+        }
+        video { display: block; }
+        
+        #preview-img {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover; display: none; z-index: 10;
+        }
+
+        .controls { display: flex; flex-direction: column; gap: 15px; width: 640px; }
+        
+        input[type="text"] {
+            width: 100%; padding: 10px; font-size: 16px; border: 2px solid #ccc;
+            border-radius: 5px; box-sizing: border-box;
+        }
+        
+        .btn-group { display: flex; gap: 10px; }
+        
+        button {
+            flex: 1; padding: 12px; font-size: 16px; font-weight: bold; color: white;
+            border: none; border-radius: 5px; cursor: pointer; transition: 0.3s;
+        }
+        #register-btn { background-color: #28a745; }
+        #register-btn:hover { background-color: #218838; }
+        
+        #upload-btn { background-color: #007bff; }
+        #upload-btn:hover { background-color: #0056b3; }
+        
+        button:disabled { background-color: #aaa !important; cursor: not-allowed; }
+        
+        #status-box {
+            padding: 15px; border-radius: 5px; width: 100%; text-align: center;
+            font-weight: bold; display: none; box-sizing: border-box;
+        }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .failure { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h2>FaceID Admin</h2>
+        <div class="nav-item" onclick="location.href='camera.html'">🏠 Live Camera</div>
+        <div class="nav-item" style="background: #252545;">👤 Register User</div>
+        <div class="nav-item" onclick="location.href='dashboard.html'">📊 Dashboard</div>
+    </div>
+
+    <div class="main">
+        <h1>Register New Face</h1>
+
+        <div id="video-container">
+            <video id="webcam" width="640" height="480" autoplay playsinline></video>
+            <img id="preview-img" alt="Uploaded Preview">
+        </div>
+
+        <div class="controls">
+            <input type="text" id="user-id" placeholder="Enter User ID (e.g. Jane_Doe)">
+            
+            <div class="btn-group">
+                <button id="register-btn">📸 Capture from Camera</button>
+                <button id="upload-btn">📁 Upload Photo File</button>
+            </div>
+            
+            <input type="file" id="file-input" accept="image/*" style="display: none;">
+
+            <div id="status-box"></div>
+        </div>
+    </div>
+
+    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const userIdInput = document.getElementById('user-id');
+        const registerBtn = document.getElementById('register-btn');
+        const uploadBtn = document.getElementById('upload-btn');
+        const fileInput = document.getElementById('file-input');
+        const previewImg = document.getElementById('preview-img');
+        const statusBox = document.getElementById('status-box');
+
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => { video.srcObject = stream; })
+            .catch(err => {
+                console.error("Camera error: ", err);
+                showStatus("⚠️ Camera access denied. You can still upload files.", false);
+            });
+
+        function showStatus(message, isSuccess) {
+            statusBox.style.display = 'block';
+            statusBox.className = isSuccess ? 'success' : 'failure';
+            statusBox.innerHTML = message;
+        }
+
+        function sendToServer(userId, imageData) {
+            fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, image: imageData })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showStatus(`✅ ${data.message}`, true);
+                    userIdInput.value = ''; 
+                    setTimeout(() => { previewImg.style.display = 'none'; }, 2000); // Hide preview after success
+                } else {
+                    showStatus(`❌ ${data.message}`, false);
+                }
+            })
+            .catch(error => {
+                showStatus("⚠️ Lost connection to server.", false);
+            })
+            .finally(() => {
+                registerBtn.disabled = false;
+                uploadBtn.disabled = false;
+                registerBtn.innerText = "📸 Capture from Camera";
+            });
+        }
+
+        //CAPTURE FROM CAMERA
+        registerBtn.addEventListener('click', () => {
+            const userId = userIdInput.value.trim();
+            if (!userId) return showStatus("⚠️ Please enter a User ID first.", false);
+
+            registerBtn.disabled = true;
+            uploadBtn.disabled = true;
+            registerBtn.innerText = "⏳ Saving...";
+            previewImg.style.display = 'none'; // Ensure video is visible
+
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/jpeg');
+            sendToServer(userId, imageData);
+        });
+
+        // UPLOAD FROM FILE
+        uploadBtn.addEventListener('click', () => {
+            const userId = userIdInput.value.trim();
+            if (!userId) return showStatus("⚠️ Please enter a User ID first.", false);
+            
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                // Show a preview over the video
+                previewImg.src = e.target.result;
+                previewImg.style.display = 'block';
+
+                // Load it into the canvas to get a standard Base64 string
+                const img = new Image();
+                img.onload = () => {
+                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    const imageData = canvas.toDataURL('image/jpeg');
+                    
+                    registerBtn.disabled = true;
+                    uploadBtn.disabled = true;
+                    
+                    sendToServer(userIdInput.value.trim(), imageData);
+                    
+                    fileInput.value = ""; 
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    </script>
+</body>
+</html>
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register New Face</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; margin: 0; display: flex; }
+        
+        .sidebar { width: 250px; background: #1a1a2e; color: white; height: 100vh; padding: 20px; position: fixed; box-sizing: border-box;}
+        .sidebar h2 { color: #4e73df; margin-top: 0;}
+        .nav-item { padding: 15px; cursor: pointer; border-radius: 5px; margin-bottom: 5px; transition: 0.2s;}
+        .nav-item:hover { background: #252545; }
+        
+        .main { flex: 1; margin-left: 300px; padding: 40px; display: flex; flex-direction: column; align-items: center; }
+        h1 { color: #333; margin-top: 0; }
+        
+        #video-container {
+            border: 4px solid #ddd; border-radius: 8px; overflow: hidden;
+            background-color: #000; margin-bottom: 20px; width: 640px; position: relative;
+        }
+        video { display: block; }
+        
+        #preview-img {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover; display: none; z-index: 10;
+        }
+
+        .controls { display: flex; flex-direction: column; gap: 15px; width: 640px; }
+        
+        input[type="text"] {
+            width: 100%; padding: 10px; font-size: 16px; border: 2px solid #ccc;
+            border-radius: 5px; box-sizing: border-box;
+        }
+        
+        .btn-group { display: flex; gap: 10px; }
+        
+        button {
+            flex: 1; padding: 12px; font-size: 16px; font-weight: bold; color: white;
+            border: none; border-radius: 5px; cursor: pointer; transition: 0.3s;
+        }
+        #register-btn { background-color: #28a745; }
+        #register-btn:hover { background-color: #218838; }
+        
+        #upload-btn { background-color: #007bff; }
+        #upload-btn:hover { background-color: #0056b3; }
+        
+        button:disabled { background-color: #aaa !important; cursor: not-allowed; }
+        
+        #status-box {
+            padding: 15px; border-radius: 5px; width: 100%; text-align: center;
+            font-weight: bold; display: none; box-sizing: border-box;
+        }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .failure { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h2>FaceID Admin</h2>
+        <div class="nav-item" onclick="location.href='camera.html'">🏠 Live Camera</div>
+        <div class="nav-item" style="background: #252545;">👤 Register User</div>
+        <div class="nav-item" onclick="location.href='dashboard.html'">📊 Dashboard</div>
+    </div>
+
+    <div class="main">
+        <h1>Register New Face</h1>
+
+        <div id="video-container">
+            <video id="webcam" width="640" height="480" autoplay playsinline></video>
+            <img id="preview-img" alt="Uploaded Preview">
+        </div>
+
+        <div class="controls">
+            <input type="text" id="user-id" placeholder="Enter User ID (e.g. Jane_Doe)">
+            
+            <div class="btn-group">
+                <button id="register-btn">📸 Capture from Camera</button>
+                <button id="upload-btn">📁 Upload Photo File</button>
+            </div>
+            
+            <input type="file" id="file-input" accept="image/*" style="display: none;">
+
+            <div id="status-box"></div>
+        </div>
+    </div>
+
+    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const userIdInput = document.getElementById('user-id');
+        const registerBtn = document.getElementById('register-btn');
+        const uploadBtn = document.getElementById('upload-btn');
+        const fileInput = document.getElementById('file-input');
+        const previewImg = document.getElementById('preview-img');
+        const statusBox = document.getElementById('status-box');
+
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => { video.srcObject = stream; })
+            .catch(err => {
+                console.error("Camera error: ", err);
+                showStatus("⚠️ Camera access denied. You can still upload files.", false);
+            });
+
+        function showStatus(message, isSuccess) {
+            statusBox.style.display = 'block';
+            statusBox.className = isSuccess ? 'success' : 'failure';
+            statusBox.innerHTML = message;
+        }
+
+        function sendToServer(userId, imageData) {
+            // UPDATED: Exact absolute URL for Port 5000 added here
+            fetch('http://127.0.0.1:5000/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, image: imageData })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showStatus(`✅ ${data.message}`, true);
+                    userIdInput.value = ''; 
+                    setTimeout(() => { previewImg.style.display = 'none'; }, 2000); // Hide preview after success
+                } else {
+                    showStatus(`❌ ${data.message}`, false);
+                }
+            })
+            .catch(error => {
+                showStatus("⚠️ Lost connection to server.", false);
+            })
+            .finally(() => {
+                registerBtn.disabled = false;
+                uploadBtn.disabled = false;
+                registerBtn.innerText = "📸 Capture from Camera";
+            });
+        }
+
+        // CAPTURE FROM CAMERA
+        registerBtn.addEventListener('click', () => {
+            const userId = userIdInput.value.trim();
+            if (!userId) return showStatus("⚠️ Please enter a User ID first.", false);
+
+            registerBtn.disabled = true;
+            uploadBtn.disabled = true;
+            registerBtn.innerText = "⏳ Saving...";
+            previewImg.style.display = 'none'; // Ensure video is visible
+
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/jpeg');
+            sendToServer(userId, imageData);
+        });
+
+        // UPLOAD FROM FILE
+        uploadBtn.addEventListener('click', () => {
+            const userId = userIdInput.value.trim();
+            if (!userId) return showStatus("⚠️ Please enter a User ID first.", false);
+            
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                // Show a preview over the video
+                previewImg.src = e.target.result;
+                previewImg.style.display = 'block';
+
+                // Load it into the canvas to get a standard Base64 string
+                const img = new Image();
+                img.onload = () => {
+                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    const imageData = canvas.toDataURL('image/jpeg');
+                    
+                    registerBtn.disabled = true;
+                    uploadBtn.disabled = true;
+                    
+                    sendToServer(userIdInput.value.trim(), imageData);
+                    
+                    fileInput.value = ""; 
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    </script>
+</body>
+</html>
